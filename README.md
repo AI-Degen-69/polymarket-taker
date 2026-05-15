@@ -39,11 +39,22 @@ End-to-end: ~15 minutes if everything goes smoothly.
 ## Heads up before you start
 
 - **Polymarket is geo-restricted.** The CLOB is unavailable in many
-  jurisdictions (US, UK, France, others). If polymarket.com blocks you, the
-  bot won't work either.
-- **This is real money on a public blockchain.** Setup costs ~$0.50 in
-  Polygon gas for a handful of transactions. Trading risks whatever you
-  fund the wallet with — start with $30 to learn.
+  jurisdictions — currently includes US, UK, France, Germany, Belgium,
+  Netherlands, Portugal, Singapore, Poland, plus OFAC-sanctioned regions
+  (the list changes; check
+  [Polymarket's region list](https://help.polymarket.com/en/articles/13364163-geographic-restrictions)).
+  If polymarket.com blocks you, this bot won't work either.
+  US users: a separate KYC'd "Polymarket US" portal exists, but it runs on
+  a different exchange that **this bot does not target**.
+  **Do not try to bypass with a VPN** — Polymarket freezes funds and won't
+  return them if they detect it.
+- **This is real money on a public blockchain.** Trading risks whatever
+  you fund the wallet with — start with $30 to learn. Minimum deposit is
+  $3.
+- **Brand new wallet only.** This guide assumes you create a fresh
+  MetaMask account specifically for the bot. Pre-V2 Polymarket accounts
+  (Safe / Proxy types) don't get a deposit wallet and won't work with
+  this code.
 - **The strategy as shipped is not consistently profitable.** Read the
   ["Expectations"](#expectations) section before you commit any real
   capital. This is a starting point you'll want to tune.
@@ -99,9 +110,13 @@ You'll do the wallet creation, the Polymarket registration, **and** the
 funding all inside MetaMask + polymarket.com — no terminal yet.
 
 1. Open MetaMask → account menu (top-right circle) → **Add account or
-   hardware wallet** → **Add a new account**.
+   hardware wallet** → **+ Ethereum account**.
 2. Name it something obvious like *polybot*.
 3. Switch to that new account in MetaMask.
+
+> **Don't use MetaMask's built-in Polymarket tab** if you see one — sign
+> in at polymarket.com instead. The bot expects the deposit wallet to be
+> provisioned through the website flow.
 
 > **Why a dedicated account?** Trading bots should run with a wallet that
 > holds nothing else. If the bot has a bug or the key leaks later, only
@@ -128,13 +143,16 @@ Easiest path for beginners — Polymarket's UI handles the on-chain plumbing
 
 1. On polymarket.com → avatar → **Deposit**.
 2. Pick **Polygon · USDC.e** as the source asset and follow the
-   instructions to send from your exchange. Start with **$30+**.
+   instructions to send from your exchange. Minimum is **$3**; start with
+   **$30+** to have enough headroom for the strategy to fire.
 3. **On the exchange's withdrawal form:**
    - **Destination address:** the one Polymarket showed you in the
      deposit modal.
    - **Network:** **Polygon** (not Ethereum, not BSC).
    - **Token:** USDC.e (sometimes labeled just "USDC" on Polygon).
 4. The deposit usually shows up on Polymarket within 1–3 minutes.
+   Polymarket auto-wraps your USDC.e into pUSD and routes it into the
+   deposit wallet for you — no scripts needed.
 
 > You do **not** need MATIC in this wallet. Polymarket sponsors gas for the
 > deposit wallet's trades. (If you ever want to *withdraw* directly
@@ -145,9 +163,10 @@ Easiest path for beginners — Polymarket's UI handles the on-chain plumbing
 Now extract the private key from MetaMask and hand it to the bot. The bot
 needs the private key to sign orders; MetaMask was just for setup.
 
-1. In MetaMask, with the *polybot* account selected → **⋮** menu (account
-   details) → **Show private key**. Enter your MetaMask password, copy
-   the key (starts with `0x`, 64 hex chars).
+1. In MetaMask, with the *polybot* account selected → **⋮** menu →
+   **Account details** → **Private key** tab → enter your MetaMask
+   password → press and **hold the "Hold to reveal Private Key" button**
+   until the key appears. Copy it (starts with `0x`, 64 hex chars).
 2. Run:
    ```bash
    .venv/bin/python scripts/import_wallet.py
