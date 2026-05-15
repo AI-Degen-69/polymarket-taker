@@ -150,9 +150,13 @@ needs the private key to sign orders; MetaMask was just for setup.
    the key (starts with `0x`, 64 hex chars).
 2. Run:
    ```bash
-   .venv/bin/python scripts/import_wallet.py 0xYOUR_PRIVATE_KEY
+   .venv/bin/python scripts/import_wallet.py
    ```
-   The script:
+   The script will prompt you to paste the key — input is hidden, so the
+   key won't appear on screen or in your shell history. Press Enter to
+   submit.
+
+   It then:
    - validates the key, derives the address,
    - **scans the on-chain DepositWalletFactory** to find the deposit
      wallet Polymarket deployed for you in step 3,

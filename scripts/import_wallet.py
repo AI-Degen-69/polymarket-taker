@@ -1,7 +1,10 @@
 """Import an existing private key (e.g. from MetaMask) into .env.
 
 Usage:
-    .venv/bin/python scripts/import_wallet.py 0xYOUR_PRIVATE_KEY
+    .venv/bin/python scripts/import_wallet.py
+
+The script will prompt you for the private key (input is hidden — won't
+appear on screen or in shell history). Paste the key, press Enter.
 
 What it does:
   1. Validates the private key + derives the EOA address.
@@ -15,6 +18,7 @@ Refuses to overwrite an existing .env so a funded key can't be wiped.
 """
 from __future__ import annotations
 
+import getpass
 import sys
 from pathlib import Path
 from typing import Optional
@@ -88,8 +92,11 @@ def upsert_env(updates: dict[str, str]) -> None:
 
 
 def main() -> int:
-    if len(sys.argv) != 2:
-        print("usage: import_wallet.py 0xYOUR_PRIVATE_KEY", file=sys.stderr)
+    if len(sys.argv) > 1:
+        print("This script reads the private key from a secure prompt, not", file=sys.stderr)
+        print("from the command line (the CLI would leak it into shell", file=sys.stderr)
+        print("history). Run with no arguments:", file=sys.stderr)
+        print("    .venv/bin/python scripts/import_wallet.py", file=sys.stderr)
         return 2
 
     if ENV_PATH.exists():
@@ -97,7 +104,12 @@ def main() -> int:
         print("  delete .env first if you really want to re-import.", file=sys.stderr)
         return 1
 
-    pk = sys.argv[1].strip()
+    print("Paste your MetaMask private key. It WILL NOT be echoed to the screen.")
+    print("(In MetaMask: account ⋮ -> Show private key. 64 hex chars, '0x' prefix optional.)")
+    pk = getpass.getpass("private key: ").strip()
+    if not pk:
+        print("no key entered", file=sys.stderr)
+        return 1
     if not pk.startswith("0x"):
         pk = "0x" + pk
     if len(pk) != 66:
