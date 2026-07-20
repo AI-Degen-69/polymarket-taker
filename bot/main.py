@@ -164,6 +164,8 @@ def loop(live: bool) -> None:
                 dry_run=dry_run,
                 fee=d.fee,
                 breakeven=d.breakeven,
+                spot_bps=spot_bps,
+                loser_ask=d.loser_ask,
             )
             time.sleep(cfg.poll_interval_sec)
             continue
@@ -242,6 +244,8 @@ def loop(live: bool) -> None:
             dry_run=dry_run,
             fee=d.fee,
             breakeven=d.breakeven,
+            spot_bps=d.spot_bps,
+            loser_ask=d.loser_ask,
         )
 
         if dry_run:
@@ -259,6 +263,9 @@ def loop(live: bool) -> None:
                 filled_size=d.size,
                 dry_run=True,
                 fee=d.fee,
+                spot_bps=d.spot_bps,
+                loser_ask=d.loser_ask,
+                breakeven=d.breakeven,
             )
         else:
             assert client is not None
@@ -283,6 +290,9 @@ def loop(live: bool) -> None:
                 error=result.error,
                 dry_run=False,
                 fee=d.fee,
+                spot_bps=d.spot_bps,
+                loser_ask=d.loser_ask,
+                breakeven=d.breakeven,
             )
             log.info("order result: status=%s filled=%s id=%s err=%s",
                      result.status, result.filled_size, result.order_id, result.error)

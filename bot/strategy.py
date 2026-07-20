@@ -43,6 +43,8 @@ class Decision:
     reason: str = ""
     fee: float = 0.0                 # modelled taker fee for this fill
     breakeven: float = 0.0           # win rate needed at this price
+    spot_bps: Optional[float] = None # BTC move vs window open at decision time
+    loser_ask: Optional[float] = None  # the OTHER side's ask (convergence gauge)
 
 
 def decide(
@@ -88,6 +90,10 @@ def decide(
                         reason=f"both sides in band: UP={book_up.best_ask}, DOWN={book_down.best_ask}")
 
     side, token, ask, avail = candidates[0]
+    # The other side's ask -- how much the market still prices the "loser".
+    # Near 0.01 = fully converged; higher = the book is still unsure.
+    loser_book = book_down if side == "UP" else book_up
+    loser_ask = loser_book.best_ask
 
     # --- Binance spot gate -------------------------------------------------
     # Backtest (584 windows): without this, the book's favoured side wins 81.3%
@@ -127,5 +133,7 @@ def decide(
         size=size,
         fee=taker_fee(size, ask),
         breakeven=breakeven_win_rate(ask),
+        spot_bps=spot_bps,
+        loser_ask=loser_ask,
         reason=f"{side} ask={ask} depth={avail} take={size} t_rem={t_remaining:.1f}s{spot_note}",
     )

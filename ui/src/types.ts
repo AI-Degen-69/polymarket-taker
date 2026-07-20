@@ -168,6 +168,37 @@ export interface Settlement {
   resolved_ts: number;
 }
 
+export interface Kpi {
+  markets: number;
+  wins: number;
+  losses: number;
+  win_rate: number | null;
+  total_pnl: number;
+  avg_win: number;
+  avg_loss: number;
+  expectancy: number | null;
+  roi_on_cost: number | null;
+  profit_factor: number | null;
+  breakeven_wr: number | null;
+  sharpe: number | null;
+  max_drawdown: number;
+  max_drawdown_pct: number | null;
+  ci_lo: number | null;
+  ci_hi: number | null;
+  verdict: 'LOSING' | 'WINNING' | 'INCONCLUSIVE' | null;
+  open_deployed: number;
+  equity_curve: number[];
+  gate: {
+    n_with_bps: number;
+    strong_n: number;
+    strong_wr: number | null;
+    weak_n: number;
+    weak_wr: number | null;
+    split_bps: number;
+  };
+  markets_to_conclusive: number;
+}
+
 export interface State {
   now: number;
   bot_running: boolean;
@@ -183,6 +214,7 @@ export interface State {
   sim: SimReport;
   spot: SpotState;
   account: Account;
+  kpi: Kpi;
   sim_positions: SimPosition[];
   settlements: Settlement[];
   decisions: Decision[];

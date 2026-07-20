@@ -238,6 +238,24 @@ def _sim_cached(ttl: float = 5.0) -> dict:
     return data
 
 
+_kpi_cache: dict = {"ts": 0.0, "data": None}
+
+
+def _kpi_cached(ttl: float = 5.0) -> dict:
+    """kpi_report() also scans the orders table; share the same 5s TTL."""
+    now = time.time()
+    if _kpi_cache["data"] is not None and now - _kpi_cache["ts"] < ttl:
+        return _kpi_cache["data"]
+    try:
+        data = store.kpi_report(cfg.sim_bankroll_usd)
+        _state["errors"].pop("kpi", None)
+    except Exception as e:
+        _state["errors"]["kpi"] = str(e)
+        data = {}
+    _kpi_cache.update(ts=now, data=data)
+    return data
+
+
 _resolved_cache: dict[str, Optional[str]] = {}
 
 
@@ -607,6 +625,7 @@ def state():
             "min_spot_offset_bps": cfg.min_spot_offset_bps,
         },
         "sim": _sim_cached(),
+        "kpi": _kpi_cached(),
         "spot": _spot_state(m),
         "settlements": store.sim_recent_settlements(limit=15),
         "decisions": recent_decisions(limit=80),

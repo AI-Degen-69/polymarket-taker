@@ -100,6 +100,15 @@ MIGRATIONS = [
     ("orders", "fee", "REAL DEFAULT 0"),
     ("decisions", "fee", "REAL DEFAULT 0"),
     ("decisions", "breakeven", "REAL DEFAULT 0"),
+    # Instrumentation added 2026-07-20 to make the strategy auditable. The gate
+    # value previously lived only inside the reason TEXT, so win-rate-by-bps
+    # could not be queried. loser_ask captures the OTHER side's price at entry
+    # (how converged the market was). Nullable -- rows before this stay NULL.
+    ("orders", "spot_bps", "REAL"),
+    ("orders", "loser_ask", "REAL"),
+    ("orders", "breakeven", "REAL"),
+    ("decisions", "spot_bps", "REAL"),
+    ("decisions", "loser_ask", "REAL"),
 ]
 
 
@@ -186,8 +195,9 @@ def db() -> Iterator[sqlite3.Connection]:
 
 _DEC_SQL = (
     "INSERT INTO decisions (ts, market_slug, condition_id, token_id, side, "
-    "t_remaining, ask_price, ask_size, action, reason, dry_run, fee, breakeven) "
-    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"
+    "t_remaining, ask_price, ask_size, action, reason, dry_run, fee, breakeven, "
+    "spot_bps, loser_ask) "
+    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
 )
 
 _dec_buf: list[tuple] = []
@@ -254,6 +264,8 @@ def log_decision(
     dry_run: bool,
     fee: float = 0.0,
     breakeven: float = 0.0,
+    spot_bps: Optional[float] = None,
+    loser_ask: Optional[float] = None,
 ) -> None:
     """Buffer a decision row; a background thread batches them to the DB.
 
@@ -269,6 +281,7 @@ def log_decision(
     row = (
         time.time(), market_slug, condition_id, token_id, side, t_remaining,
         ask_price, ask_size, action, reason, int(dry_run), fee, breakeven,
+        spot_bps, loser_ask,
     )
     _ensure_flusher()
     with _dec_lock:
@@ -289,12 +302,16 @@ def log_order(
     error: Optional[str] = None,
     dry_run: bool,
     fee: float = 0.0,
+    spot_bps: Optional[float] = None,
+    loser_ask: Optional[float] = None,
+    breakeven: float = 0.0,
 ) -> None:
     with db() as c:
         c.execute(
             "INSERT INTO orders (ts, market_slug, condition_id, token_id, side, "
-            "size, price, order_id, status, filled_size, error, dry_run, fee) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "size, price, order_id, status, filled_size, error, dry_run, fee, "
+            "spot_bps, loser_ask, breakeven) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 time.time(),
                 market_slug,
@@ -309,6 +326,9 @@ def log_order(
                 error,
                 int(dry_run),
                 fee,
+                spot_bps,
+                loser_ask,
+                breakeven,
             ),
         )
 
@@ -478,6 +498,128 @@ def sim_recent_settlements(limit: int = 20) -> list[dict]:
         }
         for slug, side, sh, cost, fees, fills, payout, won, rts in rows
     ]
+
+
+def kpi_report(bankroll: float) -> dict:
+    """Bird's-eye quant scorecard, computed MARKET-level (the honest unit).
+
+    A market is one bet: the bot may add ~25 fills to it, but it wins or loses
+    as a whole. Fill-weighted stats flatter the result because winning markets
+    accumulate more fills than losing ones, so everything here groups by market.
+    """
+    with db() as c:
+        rows = c.execute(
+            "SELECT o.condition_id, r.resolved_ts, "
+            "       SUM(o.size*o.price) cost, SUM(o.fee) fees, "
+            "       SUM(CASE WHEN o.token_id=r.winning_token THEN o.size ELSE 0 END) payout, "
+            "       MAX(o.token_id=r.winning_token) won, "
+            "       AVG(o.price) avg_price, AVG(o.spot_bps) avg_bps "
+            "FROM orders o JOIN resolutions r ON r.condition_id=o.condition_id "
+            "WHERE o.status='sim' AND o.dry_run=1 "
+            "GROUP BY o.condition_id ORDER BY r.resolved_ts ASC"
+        ).fetchall()
+        open_cost = c.execute(
+            "SELECT COALESCE(SUM(o.size*o.price+o.fee),0) FROM orders o "
+            "LEFT JOIN resolutions r ON r.condition_id=o.condition_id "
+            "WHERE o.status='sim' AND o.dry_run=1 AND r.condition_id IS NULL"
+        ).fetchone()[0]
+
+    pnls, won_flags, costs, bpses = [], [], [], []
+    equity, peak, max_dd = bankroll, bankroll, 0.0
+    curve = []
+    for cond, rts, cost, fees, payout, won, avg_price, avg_bps in rows:
+        pnl = payout - (cost + fees)
+        pnls.append(pnl); won_flags.append(bool(won)); costs.append(cost + fees)
+        if avg_bps is not None:
+            bpses.append((abs(avg_bps), bool(won)))
+        equity += pnl
+        peak = max(peak, equity)
+        max_dd = max(max_dd, peak - equity)
+        curve.append(round(equity, 2))
+
+    n = len(pnls)
+    wins = [p for p in pnls if p > 0]
+    losses = [p for p in pnls if p <= 0]
+    total = sum(pnls)
+    win_rate = len(wins) / n if n else None
+    avg_win = (sum(wins) / len(wins)) if wins else 0.0
+    avg_loss = (sum(losses) / len(losses)) if losses else 0.0
+
+    # Expectancy per market and per dollar risked.
+    expectancy = total / n if n else None
+    total_cost = sum(costs)
+    roi = (total / total_cost) if total_cost else None
+
+    # Profit factor = gross wins / gross losses. >1 profitable.
+    gross_win = sum(wins)
+    gross_loss = abs(sum(losses))
+    profit_factor = (gross_win / gross_loss) if gross_loss else None
+
+    # Loss/win ratio -> breakeven win rate the payoff structure demands.
+    lw = (abs(avg_loss) / avg_win) if avg_win else None
+    breakeven_wr = (lw / (1 + lw)) if lw else None
+
+    # Sharpe-like: mean/stdev of per-market PnL (unitless, not annualized).
+    sharpe = None
+    if n > 1:
+        mu = total / n
+        var = sum((p - mu) ** 2 for p in pnls) / (n - 1)
+        sd = var ** 0.5
+        sharpe = (mu / sd) if sd else None
+
+    # Wilson 95% CI on win rate vs the breakeven bar -> "is this conclusive?"
+    ci_lo = ci_hi = verdict = None
+    if n and win_rate is not None:
+        z = 1.96
+        d = 1 + z * z / n
+        centre = (win_rate + z * z / (2 * n)) / d
+        halfw = z * ((win_rate * (1 - win_rate) / n + z * z / (4 * n * n)) ** 0.5) / d
+        ci_lo, ci_hi = max(0.0, centre - halfw), min(1.0, centre + halfw)
+        if breakeven_wr is not None:
+            if ci_hi < breakeven_wr:
+                verdict = "LOSING"
+            elif ci_lo > breakeven_wr:
+                verdict = "WINNING"
+            else:
+                verdict = "INCONCLUSIVE"
+
+    # Gate audit: win rate above vs below the config threshold.
+    from bot.config import load as _load
+    thr = _load().min_spot_offset_bps
+    hi = [w for b, w in bpses if b >= thr * 2]      # strong signal (2x threshold)
+    lo = [w for b, w in bpses if b < thr * 2]
+    gate = {
+        "n_with_bps": len(bpses),
+        "strong_n": len(hi),
+        "strong_wr": (sum(hi) / len(hi)) if hi else None,
+        "weak_n": len(lo),
+        "weak_wr": (sum(lo) / len(lo)) if lo else None,
+        "split_bps": thr * 2,
+    }
+
+    return {
+        "markets": n,
+        "wins": len(wins),
+        "losses": len(losses),
+        "win_rate": win_rate,
+        "total_pnl": total,
+        "avg_win": avg_win,
+        "avg_loss": avg_loss,
+        "expectancy": expectancy,
+        "roi_on_cost": roi,
+        "profit_factor": profit_factor,
+        "breakeven_wr": breakeven_wr,
+        "sharpe": sharpe,
+        "max_drawdown": max_dd,
+        "max_drawdown_pct": (max_dd / peak * 100) if peak else None,
+        "ci_lo": ci_lo,
+        "ci_hi": ci_hi,
+        "verdict": verdict,
+        "open_deployed": open_cost,
+        "equity_curve": curve[-60:],   # last 60 markets for a sparkline
+        "gate": gate,
+        "markets_to_conclusive": max(0, 200 - n),  # rule of thumb from CI width
+    }
 
 
 def sim_report(window_sec: Optional[float] = None) -> dict:

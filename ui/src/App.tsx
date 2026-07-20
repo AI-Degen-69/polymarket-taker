@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { fetchState } from './api';
-import type { Account, Book, Decision, Order, Settlement, SimPosition, SimReport, SpotState, State } from './types';
+import type { Account, Book, Decision, Kpi, Order, Settlement, SimPosition, SimReport, SpotState, State } from './types';
 import { fmtDur, fmtNum, fmtPct, fmtPx, fmtTime, fmtUsd } from './format';
 
 const POLL_MS = 500;
@@ -92,6 +92,8 @@ export default function App() {
           </div>
 
           <div style={colStack}>
+            <KpiPanel kpi={state?.kpi} />
+
             <Panel
               title={m ? `LIVE MARKET · ${m.market_slug}` : 'NO LIVE MARKET'}
               titleHref={m ? `https://polymarket.com/event/${m.market_slug}` : undefined}
@@ -343,6 +345,120 @@ function SpotPanel({ spot }: { spot?: SpotState }) {
  * even after fees. EDGE = realized win rate minus that breakeven, in points.
  * Green means the bucket genuinely paid; red means it lost despite winning.
  */
+/**
+ * Bird's-eye quant scorecard. Everything here is MARKET-level — one bet per
+ * market, not per fill — because fill-weighted stats flatter the result
+ * (winning markets accumulate more fills than losing ones). The verdict banner
+ * reads the Wilson CI against the payoff-implied breakeven: green only when the
+ * whole interval clears the bar, amber while the sample is still ambiguous.
+ */
+function KpiPanel({ kpi: k }: { kpi?: Kpi }) {
+  if (!k || !k.markets) {
+    return (
+      <Panel title="KPI · BIRD'S EYE">
+        <Empty>no settled markets yet<span className="caret">_</span></Empty>
+      </Panel>
+    );
+  }
+  const pos = k.total_pnl >= 0;
+  const vColor =
+    k.verdict === 'WINNING' ? 'var(--green)'
+    : k.verdict === 'LOSING' ? 'var(--red)'
+    : 'var(--amber)';
+  const vText =
+    k.verdict === 'INCONCLUSIVE'
+      ? `INCONCLUSIVE · ~${k.markets_to_conclusive} more markets`
+      : k.verdict ?? '—';
+  const pct = (x: number | null) => (x == null ? '—' : `${(x * 100).toFixed(1)}%`);
+
+  return (
+    <Panel title="KPI · BIRD'S EYE">
+      {/* verdict banner: win rate CI vs the breakeven the payoff demands */}
+      <div style={{
+        border: `1px solid ${vColor}`, color: vColor,
+        padding: '5px 8px', marginBottom: 8, fontSize: 11, fontWeight: 700,
+        letterSpacing: '0.5px', display: 'flex', justifyContent: 'space-between',
+        fontFamily: 'var(--mono, ui-monospace, monospace)',
+      }}>
+        <span>{vText}</span>
+        <span style={{ fontWeight: 400 }}>
+          WR {pct(k.win_rate)} [{pct(k.ci_lo)}–{pct(k.ci_hi)}] vs {pct(k.breakeven_wr)}
+        </span>
+      </div>
+
+      <Sparkline data={k.equity_curve} up={pos} />
+
+      <div style={kpiGrid}>
+        <Kpi label="NET P&L" value={`${pos ? '+' : ''}${fmtUsd(k.total_pnl)}`} color={pos ? 'var(--green)' : 'var(--red)'} big />
+        <Kpi label="MARKETS" value={`${k.wins}W / ${k.losses}L`} sub={`${k.markets} total`} />
+        <Kpi label="EXPECTANCY" value={fmtUsd(k.expectancy)} sub="per market" color={(k.expectancy ?? 0) >= 0 ? 'var(--green)' : 'var(--red)'} />
+        <Kpi label="PROFIT FACTOR" value={k.profit_factor?.toFixed(2) ?? '—'} sub="gross W ÷ L" color={(k.profit_factor ?? 0) >= 1 ? 'var(--green)' : 'var(--red)'} />
+        <Kpi label="AVG WIN" value={`+${fmtUsd(k.avg_win)}`} color="var(--green)" />
+        <Kpi label="AVG LOSS" value={fmtUsd(k.avg_loss)} color="var(--red)" />
+        <Kpi label="MAX DRAWDOWN" value={fmtUsd(-k.max_drawdown)} sub={k.max_drawdown_pct != null ? `${k.max_drawdown_pct.toFixed(1)}%` : ''} color="var(--red)" />
+        <Kpi label="ROI ON RISK" value={pct(k.roi_on_cost)} sub="per $ deployed" color={(k.roi_on_cost ?? 0) >= 0 ? 'var(--green)' : 'var(--red)'} />
+        <Kpi label="SHARPE" value={k.sharpe?.toFixed(2) ?? '—'} sub="per-market" />
+      </div>
+
+      {/* gate audit — only meaningful once spot_bps rows accumulate */}
+      <div style={{ borderTop: '1px solid var(--border)', marginTop: 8, paddingTop: 6 }}>
+        <div style={{ ...kpiLabelStyle, marginBottom: 4 }}>SPOT-GATE AUDIT</div>
+        {k.gate.n_with_bps === 0 ? (
+          <div style={{ color: 'var(--txt-dim)', fontSize: 10.5 }}>
+            capturing bps on new fills — check back after ~20 markets
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 16, fontSize: 11, fontFamily: 'var(--mono, ui-monospace, monospace)' }}>
+            <span>≥{k.gate.split_bps}bps: <b style={{ color: 'var(--green)' }}>{pct(k.gate.strong_wr)}</b> <span style={{ color: 'var(--txt-dim)' }}>(n={k.gate.strong_n})</span></span>
+            <span>&lt;{k.gate.split_bps}bps: <b style={{ color: 'var(--amber)' }}>{pct(k.gate.weak_wr)}</b> <span style={{ color: 'var(--txt-dim)' }}>(n={k.gate.weak_n})</span></span>
+          </div>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+function Kpi({ label, value, sub, color, big }: { label: string; value: string; sub?: string; color?: string; big?: boolean }) {
+  return (
+    <div>
+      <div style={kpiLabelStyle}>{label}</div>
+      <div style={{
+        color: color ?? 'var(--txt-hi)', fontWeight: 700,
+        fontSize: big ? 17 : 13, fontFamily: 'var(--mono, ui-monospace, monospace)',
+        fontVariantNumeric: 'tabular-nums', lineHeight: 1.2,
+      }}>{value}</div>
+      {sub && <div style={{ color: 'var(--txt-dim)', fontSize: 9.5 }}>{sub}</div>}
+    </div>
+  );
+}
+
+/** Tiny inline equity sparkline — area fill, emphasized endpoint. */
+function Sparkline({ data, up }: { data: number[]; up: boolean }) {
+  if (!data || data.length < 2) return null;
+  const w = 260, h = 34, pad = 2;
+  const min = Math.min(...data), max = Math.max(...data);
+  const span = max - min || 1;
+  const x = (i: number) => pad + (i / (data.length - 1)) * (w - 2 * pad);
+  const y = (v: number) => pad + (1 - (v - min) / span) * (h - 2 * pad);
+  const pts = data.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  const stroke = up ? 'var(--green)' : 'var(--red)';
+  const lastX = x(data.length - 1), lastY = y(data[data.length - 1]);
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} width="100%" height={h} style={{ display: 'block', marginBottom: 8 }} preserveAspectRatio="none">
+      <polyline points={`${pad},${h - pad} ${pts} ${lastX},${h - pad}`} fill={stroke} opacity="0.12" stroke="none" />
+      <polyline points={pts} fill="none" stroke={stroke} strokeWidth="1.3" vectorEffect="non-scaling-stroke" />
+      <circle cx={lastX} cy={lastY} r="2" fill={stroke} />
+    </svg>
+  );
+}
+
+const kpiGrid: CSSProperties = {
+  display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px 10px',
+};
+const kpiLabelStyle: CSSProperties = {
+  color: 'var(--txt-dim)', fontSize: 9, letterSpacing: '0.6px', textTransform: 'uppercase',
+};
+
 function SimPanel({ sim }: { sim?: SimReport }) {
   const t = sim?.total ?? {};
   const buckets = sim?.buckets ?? {};
