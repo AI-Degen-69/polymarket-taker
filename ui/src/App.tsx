@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { fetchState } from './api';
 import type { Account, Book, Decision, Kpi, Order, Settlement, SimPosition, SimReport, SpotState, State } from './types';
-import { fmtDur, fmtNum, fmtPct, fmtPx, fmtTime, fmtUsd } from './format';
+import { fmtDur, fmtNum, fmtPx, fmtTime, fmtUsd } from './format';
 
 const POLL_MS = 500;
 
@@ -71,19 +71,12 @@ export default function App() {
           <div style={colStack}>
             <AccountPanel account={state?.account} />
 
-            <Panel title="STRATEGY · BONEREAPER">
+            <Panel title="STRATEGY · COPY BONEREAPER">
               <Row k="ENTRY BAND" v={`${fmtPx(state?.config.loser_floor)} – ${fmtPx(state?.config.max_entry_price)}`} mono />
               <Row k="WINDOW" v={`${state?.config.min_t_remaining_sec ?? '?'}–${state?.config.seconds_before_close ?? '?'}s`} mono />
               <Row k="FILLS / MKT" v={`≤ ${state?.config.max_entries_per_market ?? '?'}`} mono />
               <Row k="SIZE SCALE" v={`${state?.config.size_scale ?? 1}×`} mono />
-              <Sep />
-              <Row k="MAX OPEN" v={String(state?.config.max_open_positions ?? '')} mono />
-              <Row
-                k="EXECUTION"
-                v={state?.config.sim_only ? 'SIM — NO ORDERS' : 'ARMED'}
-                colored={state?.config.sim_only ? 1 : -1}
-                mono
-              />
+              <Row k="GATE" v={`≥ ${state?.config.min_spot_offset_bps ?? '?'} bps`} mono />
             </Panel>
 
             <SpotPanel spot={state?.spot} />
@@ -278,28 +271,15 @@ function AccountPanel({ account: a }: { account?: Account }) {
   const pnl = a?.total_pnl ?? 0;
   const deployedPct =
     a && a.bankroll ? ((a.deployed / a.bankroll) * 100).toFixed(0) : '0';
+  // Balance sheet only. All performance stats (P&L, win rate, fees, edge) live
+  // in the KPI pane so there is exactly one home for each number.
   return (
     <Panel title="PAPER ACCOUNT">
       <Row k="EQUITY" v={fmtUsd(a?.equity)} hi big colored={pnl} />
-      <Row
-        k="TOTAL P&L"
-        v={a ? `${pnl >= 0 ? '+' : ''}${fmtUsd(pnl)}  (${a.return_pct >= 0 ? '+' : ''}${a.return_pct.toFixed(2)}%)` : '—'}
-        colored={pnl}
-        mono
-      />
       <Sep />
       <Row k="STARTING" v={fmtUsd(a?.bankroll)} dim mono />
       <Row k="CASH FREE" v={fmtUsd(a?.cash)} mono />
-      <Row k="OPEN VALUE" v={fmtUsd(a?.open_value)} mono />
-      <Row k="DEPLOYED" v={`${fmtUsd(a?.deployed)} (${deployedPct}%)`} dim mono />
-      <Sep />
-      <Row k="REALIZED" v={fmtUsd(a?.realized_pnl)} colored={a?.realized_pnl ?? 0} mono />
-      <Row k="FEES PAID" v={fmtUsd(a?.total_fees)} colored={-1} mono />
-      <Row
-        k="SETTLED FILLS"
-        v={a ? `${a.wins} / ${a.fills_resolved} won` : '—'}
-        mono
-      />
+      <Row k="DEPLOYED" v={`${fmtUsd(a?.deployed)} (${deployedPct}%)`} mono />
     </Panel>
   );
 }
@@ -397,7 +377,16 @@ function KpiPanel({ kpi: k }: { kpi?: Kpi }) {
         <Kpi label="AVG LOSS" value={fmtUsd(k.avg_loss)} color="var(--red)" />
         <Kpi label="MAX DRAWDOWN" value={fmtUsd(-k.max_drawdown)} sub={k.max_drawdown_pct != null ? `${k.max_drawdown_pct.toFixed(1)}%` : ''} color="var(--red)" />
         <Kpi label="ROI ON RISK" value={pct(k.roi_on_cost)} sub="per $ deployed" color={(k.roi_on_cost ?? 0) >= 0 ? 'var(--green)' : 'var(--red)'} />
-        <Kpi label="SHARPE" value={k.sharpe?.toFixed(2) ?? '—'} sub="per-market" />
+        <Kpi label="FEES PAID" value={fmtUsd(k.total_fees)} sub="cumulative" color="var(--red)" />
+      </div>
+
+      {/* Per-market P&L distribution. The tell of this strategy is the fat left
+          tail: a wall of small wins and a few deep losses. */}
+      <PnlHistogram bins={k.pnl_histogram} />
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: 'var(--txt-dim)', marginTop: 2 }}>
+        <span>← losses ($/market)</span>
+        <span>Sharpe {k.sharpe?.toFixed(2) ?? '—'}</span>
+        <span>wins →</span>
       </div>
 
       {/* gate audit — only meaningful once spot_bps rows accumulate */}
@@ -452,6 +441,37 @@ function Sparkline({ data, up }: { data: number[]; up: boolean }) {
   );
 }
 
+/** Per-market P&L histogram — bars left (loss, red) to right (win, green). */
+function PnlHistogram({ bins }: { bins: { label: string; count: number; neg: boolean }[] }) {
+  if (!bins || !bins.length) return null;
+  const max = Math.max(1, ...bins.map((b) => b.count));
+  const H = 46;
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: H }}>
+        {bins.map((b) => (
+          <div key={b.label} title={`${b.label}: ${b.count} markets`}
+            style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: '100%' }}>
+            <div style={{
+              height: `${(b.count / max) * 100}%`,
+              minHeight: b.count ? 2 : 0,
+              background: b.neg ? 'var(--red)' : 'var(--green)',
+              opacity: b.count ? 0.85 : 0.15,
+            }} />
+          </div>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 2, marginTop: 1 }}>
+        {bins.map((b) => (
+          <span key={b.label} style={{ flex: 1, textAlign: 'center', fontSize: 7.5, color: 'var(--txt-dim)', overflow: 'hidden' }}>
+            {b.count || ''}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const kpiGrid: CSSProperties = {
   display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px 10px',
 };
@@ -464,22 +484,15 @@ function SimPanel({ sim }: { sim?: SimReport }) {
   const buckets = sim?.buckets ?? {};
   const n = t.n ?? 0;
 
+  // Only the per-entry-price breakdown lives here now -- the headline totals
+  // moved to the KPI pane (which is MARKET-level; these buckets are per-FILL by
+  // price, a different and complementary cut). Keeping both stopped the two
+  // panels showing conflicting win-rate numbers.
   return (
-    <Panel title="SIMULATION · NET OF FEES">
-      <Row k="NET P&L" v={fmtUsd(t.pnl)} colored={t.pnl ?? 0} hi big />
-      <Row k="FILLS RESOLVED" v={String(n)} />
-      {/* win_rate is a FRACTION (0.99), not a percentage. fmtPct only appends
-          '%', so passing it raw rendered 99% as "1.0%". */}
-      <Row k="WIN RATE" v={n && t.win_rate != null ? fmtPct(t.win_rate * 100) : '—'} />
-      <Row k="COST BASIS" v={fmtUsd(t.cost)} dim />
-      <Row k="FEES PAID" v={fmtUsd(t.fees)} colored={-1} />
-      <Row
-        k="EDGE"
-        v={t.pnl_bps_of_cost != null ? `${t.pnl_bps_of_cost.toFixed(1)} bps` : '—'}
-        colored={t.pnl_bps_of_cost ?? 0}
-      />
-      <Row k="PENDING" v={String(t.pending ?? 0)} dim />
-      <Sep />
+    <Panel title="WIN RATE BY ENTRY PRICE · per fill">
+      <div style={{ color: 'var(--txt-dim)', fontSize: 10, padding: '0 0 4px' }}>
+        {n} resolved fills · WIN must beat NEED to profit at that price
+      </div>
       <div style={{ display: 'flex', color: 'var(--txt-dim)', fontSize: '10px', padding: '2px 0' }}>
         <span style={{ flex: 1.3 }}>PRICE</span>
         <span style={{ flex: 0.7, textAlign: 'right' }}>N</span>
@@ -555,16 +568,22 @@ function BookView({
     else if (ask > floor) askColor = 'var(--amber-bright)';
     else askColor = 'var(--txt-dim)';
   }
+  // Bid and ask grouped side by side (no full-width spacer) so the eye reads
+  // the spread at a glance instead of scanning across dead space.
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '3px 0', borderTop: '1px dashed var(--border)' }}>
-      <span style={{ color: 'var(--txt-dim)', width: 36 }}>{label}</span>
-      <span style={{ color: 'var(--txt-dim)' }}>bid</span>
-      <span style={{ color: 'var(--green)' }}>{fmtPx(book?.best_bid)}</span>
-      <span style={{ color: 'var(--txt-dim)' }}>×{fmtNum(book?.bid_size, 0)}</span>
-      <span style={spacer} />
-      <span style={{ color: 'var(--txt-dim)' }}>ask</span>
-      <span style={{ color: askColor, fontWeight: 700 }}>{fmtPx(ask)}</span>
-      <span style={{ color: 'var(--txt-dim)' }}>×{fmtNum(book?.ask_size, 0)}</span>
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, padding: '5px 0', borderTop: '1px dashed var(--border)', fontSize: 15 }}>
+      <span style={{ color: 'var(--txt-dim)', width: 46, fontSize: 12, letterSpacing: '0.5px' }}>{label}</span>
+      <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 4 }}>
+        <span style={{ color: 'var(--txt-dim)', fontSize: 10 }}>BID</span>
+        <span style={{ color: 'var(--green)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtPx(book?.best_bid)}</span>
+        <span style={{ color: 'var(--txt-dim)', fontSize: 11 }}>×{fmtNum(book?.bid_size, 0)}</span>
+      </span>
+      <span style={{ color: 'var(--border-hi)' }}>/</span>
+      <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 4 }}>
+        <span style={{ color: 'var(--txt-dim)', fontSize: 10 }}>ASK</span>
+        <span style={{ color: askColor, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtPx(ask)}</span>
+        <span style={{ color: 'var(--txt-dim)', fontSize: 11 }}>×{fmtNum(book?.ask_size, 0)}</span>
+      </span>
     </div>
   );
 }

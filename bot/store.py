@@ -525,10 +525,12 @@ def kpi_report(bankroll: float) -> dict:
         ).fetchone()[0]
 
     pnls, won_flags, costs, bpses = [], [], [], []
+    total_fees = 0.0
     equity, peak, max_dd = bankroll, bankroll, 0.0
     curve = []
     for cond, rts, cost, fees, payout, won, avg_price, avg_bps in rows:
         pnl = payout - (cost + fees)
+        total_fees += fees
         pnls.append(pnl); won_flags.append(bool(won)); costs.append(cost + fees)
         if avg_bps is not None:
             bpses.append((abs(avg_bps), bool(won)))
@@ -597,12 +599,37 @@ def kpi_report(bankroll: float) -> dict:
         "split_bps": thr * 2,
     }
 
+    # Per-market P&L histogram. This strategy's whole character is negative
+    # skew -- many small wins, rare large losses -- and a histogram of market
+    # P&L makes that fat left tail impossible to miss. Fixed bins so the shape
+    # is stable frame to frame.
+    hist = []
+    if pnls:
+        edges = [-250, -150, -100, -50, -20, -5, 0, 5, 10, 20, 50]
+        labels = ["<-150", "-150", "-100", "-50", "-20", "-5", "0-5",
+                  "5-10", "10-20", "20-50", "50+"]
+        counts = [0] * len(labels)
+        for p in pnls:
+            placed = False
+            for i in range(1, len(edges)):
+                if p < edges[i]:
+                    counts[i - 1] += 1
+                    placed = True
+                    break
+            if not placed:
+                counts[-1] += 1
+        hist = [{"label": labels[i], "count": counts[i],
+                 "neg": edges[i] < 0 if i < len(edges) else False}
+                for i in range(len(labels))]
+
     return {
         "markets": n,
         "wins": len(wins),
         "losses": len(losses),
         "win_rate": win_rate,
         "total_pnl": total,
+        "total_fees": total_fees,
+        "pnl_histogram": hist,
         "avg_win": avg_win,
         "avg_loss": avg_loss,
         "expectancy": expectancy,

@@ -174,6 +174,8 @@ export interface Kpi {
   losses: number;
   win_rate: number | null;
   total_pnl: number;
+  total_fees: number;
+  pnl_histogram: { label: string; count: number; neg: boolean }[];
   avg_win: number;
   avg_loss: number;
   expectancy: number | null;

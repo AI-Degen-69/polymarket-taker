@@ -627,7 +627,9 @@ def state():
         "sim": _sim_cached(),
         "kpi": _kpi_cached(),
         "spot": _spot_state(m),
-        "settlements": store.sim_recent_settlements(limit=15),
+        # All resolved markets since inception. The panel scrolls; this is
+        # cheap because it's one GROUP BY over the orders table.
+        "settlements": store.sim_recent_settlements(limit=5000),
         "decisions": recent_decisions(limit=80),
         "orders": recent_orders(limit=30),
         "errors": _state.get("errors") or {},
