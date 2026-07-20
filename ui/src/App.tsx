@@ -330,7 +330,9 @@ function SimPanel({ sim }: { sim?: SimReport }) {
     <Panel title="SIMULATION · NET OF FEES">
       <Row k="NET P&L" v={fmtUsd(t.pnl)} colored={t.pnl ?? 0} hi big />
       <Row k="FILLS RESOLVED" v={String(n)} />
-      <Row k="WIN RATE" v={n ? fmtPct(t.win_rate ?? null) : '—'} />
+      {/* win_rate is a FRACTION (0.99), not a percentage. fmtPct only appends
+          '%', so passing it raw rendered 99% as "1.0%". */}
+      <Row k="WIN RATE" v={n && t.win_rate != null ? fmtPct(t.win_rate * 100) : '—'} />
       <Row k="COST BASIS" v={fmtUsd(t.cost)} dim />
       <Row k="FEES PAID" v={fmtUsd(t.fees)} colored={-1} />
       <Row

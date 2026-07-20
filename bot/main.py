@@ -45,8 +45,13 @@ def loop(live: bool) -> None:
     # works identically on Linux/in the container.
     try:
         (config.ROOT / "bot.win.pid").write_text(str(os.getpid()))
+        # Also write the mode. The launch scripts do this locally, but in the
+        # container run_service.py starts us directly and never did -- so the
+        # dashboard's mode chip read a missing file and showed OFFLINE while
+        # the bot was demonstrably RUNNING right next to it.
+        (config.ROOT / "bot.mode").write_text("live" if live else "paper")
     except Exception as e:
-        log.warning("could not write pid file: %s", e)
+        log.warning("could not write pid/mode file: %s", e)
 
     # Materialize the DB schema up front.
     with store.db():
