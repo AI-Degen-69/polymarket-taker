@@ -100,11 +100,11 @@ def decide(
                             reason="spot feed unavailable/stale — gate fails closed")
         if abs(spot_bps) < cfg.min_spot_offset_bps:
             return Decision(action="SKIP_SPOT_FLAT", side=side, price=ask,
-                            reason=f"|{spot_bps:+.1f}bps| < {cfg.min_spot_offset_bps}bps — too close to call")
+                            reason=f"|{spot_bps:+.2f}bps| < {cfg.min_spot_offset_bps}bps threshold — too close to call")
         want_side = favored_side(spot_bps)
         if side != want_side:
             return Decision(action="SKIP_SPOT_DISAGREE", side=side, price=ask,
-                            reason=f"book favors {side} but spot {spot_bps:+.1f}bps favors {want_side}")
+                            reason=f"book favors {side} but spot {spot_bps:+.2f}bps favors {want_side}")
 
     want = cfg.size_for_price(ask)
     if want <= 0:
@@ -118,7 +118,7 @@ def decide(
         return Decision(action="SKIP_SIZE", side=side, price=ask, size=avail,
                         reason=f"{side} depth {avail} < min {cfg.min_order_shares} shares")
 
-    spot_note = f" spot={spot_bps:+.1f}bps" if spot_bps is not None else ""
+    spot_note = f" spot={spot_bps:+.2f}bps" if spot_bps is not None else ""
     return Decision(
         action="BUY",
         side=side,
