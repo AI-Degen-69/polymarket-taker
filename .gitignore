@@ -35,3 +35,7 @@ research/*.json
 .DS_Store
 bot.mode
 
+
+# stray CLI artifacts
+.railway-config-pull-*/
+.railway/
