@@ -18,6 +18,73 @@ from __future__ import annotations
 
 import os
 
+_EXPLAINER = r"""
+<div class="explain">
+  <div class="ex-head">WHAT IS THIS PAGE · GATE_COLLECTOR</div>
+  <div class="ex-grid">
+    <div class="ex-card">
+      <div class="ex-h">🎯 OBJECTIVE</div>
+      <div class="ex-b">Settle the open question from the gate retest: does the
+      <b>book-favoured-side + Binance spot-gate</b> combo actually predict the
+      winner ~96% of the time <b>forward</b>, on live data? The backtest claimed
+      81&rarr;96 but could only measure the spot signal (77&rarr;93); the CLOB
+      book is live-only and was never tested. This page collects it window by
+      window until the sample is big enough to call.</div>
+    </div>
+    <div class="ex-card">
+      <div class="ex-h">👁 WHAT WE WATCH</div>
+      <div class="ex-b">Every 5-min BTC window: at <b>t-120s</b> (the moment the
+      bot may enter) we snapshot the <b>CLOB order book</b> for both sides
+      (UP/DOWN bid+ask) and the <b>Binance spot move</b> vs the window open
+      (spot_bps). We then record the <b>real winner</b> once Polymarket resolves.</div>
+    </div>
+    <div class="ex-card">
+      <div class="ex-h">🔬 WHAT WE INVESTIGATE</div>
+      <div class="ex-b">Two signals, measured against the real outcome:<br>
+      &bull; <b>hit_book</b> — did the book-favoured side win? (ungated, ~81% in backtest)<br>
+      &bull; <b>hit_gate</b> — did BOTH the book AND a &ge;5bps Binance move agree, and win? (gated, ~96% in backtest)</div>
+    </div>
+    <div class="ex-card">
+      <div class="ex-h">📊 RESULTS WE EXPECT</div>
+      <div class="ex-b">The two bars at the top tell the story:<br>
+      &bull; <b>BOOK ACC (ungated)</b> should sit near <b>~81%</b>.<br>
+      &bull; <b>GATE ACC (gated)</b> should sit near <b>~96%</b>.<br>
+      &bull; <b>GATE COVERAGE</b> = % of windows the &ge;5bps gate actually fires on (~25-40%).</div>
+    </div>
+    <div class="ex-card">
+      <div class="ex-h">⚖️ HOW A VERDICT LOOKS</div>
+      <div class="ex-b"><b>LIVE / KEEP GATE:</b> GATE ACC &ge; ~94% (clears the taker fee breakeven)
+      with a CI that excludes 90%.<br>
+      <b>PARKED / DROP GATE:</b> GATE ACC &le; breakeven, or no lift over BOOK ACC.<br>
+      <b>INCONCLUSIVE:</b> not enough resolved windows yet (need ~150-300).</div>
+    </div>
+    <div class="ex-card">
+      <div class="ex-h">🧭 POSSIBLE SCENARIOS</div>
+      <div class="ex-b">
+      &bull; <b>Reproduces backtest:</b> BOOK ~81%, GATE ~96% &rarr; gate is real, keep it.<br>
+      &bull; <b>Book strong, gate flat:</b> BOOK ~90%+, GATE no better &rarr; gate adds nothing; drop it.<br>
+      &bull; <b>Both weak:</b> BOOK &lt; fee breakeven &rarr; the whole signal is noise; strategy rethink.<br>
+      &bull; <b>Coverage too low:</b> gate fires &lt;15% of windows &rarr; rarely usable even if accurate.</div>
+    </div>
+    <div class="ex-card">
+      <div class="ex-h">🔎 INDICATORS TO WATCH</div>
+      <div class="ex-b">
+      &bull; <b>WINDOWS RESOLVED</b> climbing past ~150 (sample becoming real).<br>
+      &bull; <b>OPEN</b> lane draining as windows resolve.<br>
+      &bull; <b>SETTLE</b> cards: green border = hit_gate &check;, red = miss &cross;.<br>
+      &bull; A stable gap <b>GATE ACC &minus; BOOK ACC</b> of ~10-15 pts = the gate is earning its place.</div>
+    </div>
+    <div class="ex-card">
+      <div class="ex-h">⏳ WHAT IT TAKES TO GET A VERDICT</div>
+      <div class="ex-b">~300 windows &asymp; <b>25 hours</b> of live collection. The collector runs
+      24/7 in the same container, writing only to <code>COLLECTOR_DB</code> (never the
+      bot's trades.db). No action needed from you — just let it run and watch the
+      bars converge.</div>
+    </div>
+  </div>
+</div>
+"""
+
 _PAGE_HEAD = r"""
 <style>
  :root{--bg:#0a0c0d;--pan:#121618;--pan2:#161b1e;--bd:#232a2e;--tx:#d6dbd8;
@@ -63,6 +130,13 @@ _PAGE_HEAD = r"""
  th{color:var(--dim);text-align:right;font-weight:400;padding:3px 4px;border-bottom:1px solid var(--bd)}
  th:first-child,td:first-child{text-align:left}
  td{padding:3px 4px;text-align:right;font-variant-numeric:tabular-nums}
+ .explain{border-bottom:1px solid var(--bd);padding:10px 12px;background:#0d1011}
+ .ex-head{color:var(--am);font-weight:700;letter-spacing:1.2px;font-size:12px;margin-bottom:8px}
+ .ex-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:8px}
+ .ex-card{border:1px solid var(--bd);background:var(--pan);padding:8px 10px;border-radius:5px}
+ .ex-h{color:var(--am);font-weight:700;font-size:11.5px;margin-bottom:4px;letter-spacing:.5px}
+ .ex-b{color:var(--tx);font-size:12px;line-height:1.6}
+ .ex-b code{color:var(--bl);background:#10141a;padding:0 4px;border-radius:3px}
 </style>
 
 <div class="bar">
@@ -76,6 +150,7 @@ _PAGE_HEAD = r"""
   <span style="flex:1"></span>
   <span id="clock" class="d"></span>
 </div>
+""" + _EXPLAINER + r"""
 <div class="kpis" id="kpis"></div>
 <div class="kan" id="kan"></div>
 """
@@ -96,10 +171,13 @@ async function tick(){
   const st=s.stats||{}, w=s.windows||[];
   const K=(n,v,sub,c)=>`<div class="k"><div class="n">${n}</div>
       <div class="v ${c||''}">${v}</div><div class="s">${sub||''}</div></div>`;
+  const gap = (st.book_acc!=null && st.gate_acc!=null)
+      ? (st.gate_acc - st.book_acc).toFixed(1)+' pts' : '—';
   $('kpis').innerHTML =
       K('WINDOWS RESOLVED', st.n||0, 'in sample', '')
     + K('BOOK ACC (ungated)', pct(st.book_acc), 'favoured side hit', cls((st.book_acc||0)-50))
     + K('GATE ACC (gated)', pct(st.gate_acc), '|spot|>=5bps hit', cls((st.gate_acc||0)-90))
+    + K('GATE GAP', gap, 'gate - book', cls((st.gate_acc||0)-(st.book_acc||0)))
     + K('GATE COVERAGE', pct(st.gate_coverage), '% windows gate-eligible', '')
     + K('HIT BOOK', st.hit_book||0, 'raw wins', 'g')
     + K('HIT GATE', st.hit_gate||0, 'gated wins', 'g')
@@ -119,7 +197,6 @@ async function tick(){
   const watch=w.filter(x=>x.status==='OPEN'&&!x.snap_ts);
   const gate =w.filter(x=>x.status==='OPEN'&&x.snap_ts&&x.spot_bps==null);
   const fire =w.filter(x=>x.status==='OPEN'&&x.snap_ts&&x.spot_bps!=null);
-  const hold =w.filter(x=>x.status==='RESOLVED'===false&&x.snap_ts&&false);
   const settle=w.filter(x=>x.status==='RESOLVED');
   $('kan').innerHTML =
       lane('t1','① WATCH','l1',watch.map(card))

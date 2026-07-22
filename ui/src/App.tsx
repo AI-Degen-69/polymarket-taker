@@ -147,8 +147,8 @@ export default function App() {
 }
 
 function TopBar({
-  time, botRunning, botMode, riskState, err, lastFlashAt,
-}: { time: number; botRunning: boolean; botMode: string; riskState: string; err: string | null; lastFlashAt: number }) {
+  time, botRunning, botMode, riskState, err, lastFlashAt, active = 'live',
+}: { time: number; botRunning: boolean; botMode: string; riskState: string; err: string | null; lastFlashAt: number; active?: 'live' | 'kanban' | 'collector' }) {
   const blink = Date.now() - lastFlashAt < 5000;
   const riskOk = riskState === 'OK';
   const botLabel = !botRunning
@@ -169,6 +169,27 @@ function TopBar({
       ? { label: 'PAPER', bg: '#001a0d', fg: 'var(--green)', border: 'var(--green)' }
       : { label: 'OFFLINE', bg: 'transparent', fg: 'var(--txt-dim)', border: 'var(--border-hi)' };
 
+  const navItem = (href: string, label: string, key: string) => {
+    const isCur = active === key;
+    return (
+      <a
+        href={href}
+        style={{
+          color: isCur ? 'var(--bg)' : 'var(--txt-dim)',
+          textDecoration: 'none',
+          fontSize: 11,
+          padding: '2px 9px',
+          borderRadius: 4,
+          fontWeight: isCur ? 700 : 400,
+          border: `1px solid ${isCur ? 'var(--amber)' : 'var(--border-hi)'}`,
+          background: isCur ? 'var(--amber)' : 'transparent',
+        }}
+      >
+        {label}
+      </a>
+    );
+  };
+
   return (
     <div style={topBarStyle}>
       <span style={{ color: 'var(--amber)', fontWeight: 700 }}>POLY_HFT</span>
@@ -184,6 +205,11 @@ function TopBar({
         letterSpacing: '1.5px',
         fontSize: 10,
       }}>{modeChip.label}</span>
+      <span style={{ display: 'flex', gap: 5, marginLeft: 12 }}>
+        {navItem('/', 'LIVE', 'live')}
+        {navItem('/kanban', 'KANBAN', 'kanban')}
+        {navItem('/collector', 'COLLECTOR', 'collector')}
+      </span>
       <span style={spacer} />
       <span style={{ color: botColor, fontWeight: 600 }}>
         ● BOT {botLabel}

@@ -159,3 +159,13 @@ ungated book-accuracy vs gated accuracy building up window-by-window.
 **Verdict.** LIVE — design complete and shipped; awaiting the fresh sample to
 settle the OPEN question from Session 2 (does the book-favoured-side + gate
 combo actually hit ~96% forward?).
+
+### Collector page made self-documenting + SPA nav wired
+
+**Method.** Added an explainer block to `/collector` (objective, what we watch,
+what we investigate, expected results, verdict shape, scenarios, indicators,
+time-to-verdict) and a `GATE GAP` KPI (gate_acc − book_acc). Added a
+LIVE/KANBAN/COLLECTOR nav to the classic SPA `TopBar` (it was missing — only
+the kanban/collector pages had it), so every view can switch.
+
+**Verdict.** LIVE — no research conclusion changed; documentation/UX only.
