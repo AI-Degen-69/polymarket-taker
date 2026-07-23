@@ -74,14 +74,19 @@ PAGE = r"""
   <b>TAKER_BOT</b><span class="d">·</span><span>BTC 5MIN</span>
   <span class="chip" id="mode">PAPER</span>
   <span id="live" class="d"></span>
+  <span class="nav" style="display:flex;gap:6px;margin-left:10px">
+    <a href="/" style="color:var(--dim);text-decoration:none;font-size:12px;padding:3px 10px;border:1px solid var(--bd);border-radius:4px">LIVE</a>
+    <a href="/kanban" style="color:var(--bg);background:var(--am);border:1px solid var(--am);text-decoration:none;font-size:12px;padding:3px 10px;border-radius:4px;font-weight:700">KANBAN</a>
+    <a href="/collector" style="color:var(--dim);text-decoration:none;font-size:12px;padding:3px 10px;border:1px solid var(--bd);border-radius:4px">COLLECTOR</a>
+  </span>
   <span style="flex:1"></span>
-  <a href="/" style="color:var(--dim);text-decoration:none;font-size:11.5px">classic view →</a>
   <span id="clock" class="d"></span>
 </div>
 <div class="samp" id="samp"></div>
 <div class="livebar" id="livebar"></div>
 <div class="kpis" id="kpis"></div>
 <div class="kan" id="kan"></div>
+<div class="note" id="foot" style="display:flex;gap:18px;flex-wrap:wrap"></div>
 
 <script>
 const $=(x)=>document.getElementById(x);
@@ -91,6 +96,15 @@ const num=(v,d=0)=>v==null?'—':Number(v).toFixed(d);
 const cls=(v)=>v==null?'':(v>=0?'g':'r_');
 const hhmm=(t)=>t?new Date(t*1000).toLocaleTimeString():'—';
 const seen={};
+
+(async function(){
+  let meta={};
+  try{ meta=await (await fetch('/api/meta',{cache:'no-store'})).json(); }catch(e){}
+  const f=document.getElementById('foot');
+  if(f) f.innerHTML =
+      (meta.deploy_sha?`<span>sha: ${meta.deploy_sha}</span>`:'')
+    + (meta.railway_deploy_id?`<span>railway: ${meta.railway_deploy_id.slice(0,8)}</span>`:'');
+})();
 
 function lane(id,title,c,cards,note){
   const s=seen[id]=seen[id]||new Set();

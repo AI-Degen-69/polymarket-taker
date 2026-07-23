@@ -192,16 +192,21 @@ async function tick(){
     + K('OPEN', st.open||0, 'awaiting resolve', 'a');
 
   // Two-flames verdict strip.
-  const enough = n>=30;
-  const bookHot = enough && st.book_acc!=null && st.book_acc>=81;
-  const gateHot = enough && st.gate_acc!=null && st.gate_acc>=94;
+  // book_acc is measured over ~all resolved windows (n), so it is stable by n>=30.
+  // gate_acc is measured over ONLY the gated windows (gate_n); it needs a
+  // reasonable gated base before the >=94% flame means anything. Floor it.
+  const bookEnough = n>=30;
+  const gateEnough = (st.gate_n||0) >= 20;   // ~20 gated windows before heat is meaningful
+  const bookHot = bookEnough && st.book_acc!=null && st.book_acc>=81;
+  const gateHot = gateEnough && st.gate_acc!=null && st.gate_acc>=94;
   const gapV = (st.gate_acc||0)-(st.book_acc||0);
   const pill=(hot,label,sub)=>`<span class="pill ${hot?'hot':'cold'}">${hot?'🔥':'❄️'} ${label}
       ${sub?`<small>${sub}</small>`:''}</span>`;
   $('verdict').innerHTML =
-      (enough? '' : `<span class="d" style="font-size:11px">collecting… need ~30 windows before heat is meaningful (${n} now)</span>`)
-    + pill(bookHot, 'BOOK HEAT', enough?`${pct(st.book_acc)}`:'')
-    + pill(gateHot, 'GATE HEAT', enough?`${pct(st.gate_acc)}`:'')
+      (!bookEnough? `<span class="d" style="font-size:11px">collecting… need ~30 windows before heat is meaningful (${n} now)</span>`
+       : (!gateEnough? `<span class="d" style="font-size:11px">gate still warming… need ~20 gated windows (${(st.gate_n||0)} now)</span>` : ''))
+    + pill(bookHot, 'BOOK HEAT', bookEnough?`${pct(st.book_acc)}`:'')
+    + pill(gateHot, 'GATE HEAT', gateEnough?`${pct(st.gate_acc)} · n=${(st.gate_n||0)}`:'')
     + `<span class="pill ${gapV>0?'hot':'cold'}">${gapV>0?'🔥':'❄️'} GATE GAP
        <small>${gapV>0?'+':''}${gapV.toFixed(1)} pts</small></span>`;
 

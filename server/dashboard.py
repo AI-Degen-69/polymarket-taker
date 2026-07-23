@@ -790,9 +790,15 @@ def _collector_state() -> dict:
     resolved = [w for w in windows if w["status"] == "RESOLVED"]
     n = len(resolved)
     hit_book = sum(1 for w in resolved if w["hit_book"])
-    hit_gate = sum(1 for w in resolved if w["hit_gate"])
-    gate_cov = sum(1 for w in resolved if w["spot_bps"] is not None
-                   and abs(w["spot_bps"]) >= 5.0)
+    # gated = windows where the gate actually FIRED (|spot_bps| >= 5). The
+    # "gated accuracy" is the win rate among those windows only -- it is the
+    # direct forward analogue of the backtest's 81->96 gate number, and it is
+    # what GATE HEAT >=94% tests. Dividing by n (all windows) is wrong: it is
+    # capped at gate_coverage (~33%) and can never light the flame.
+    gated = [w for w in resolved
+             if w["spot_bps"] is not None and abs(w["spot_bps"]) >= 5.0]
+    gate_n = len(gated)
+    hit_gate = sum(1 for w in gated if w["hit_gate"])
     return {
         "db": str(p), "present": True,
         "windows": windows,
@@ -801,9 +807,10 @@ def _collector_state() -> dict:
             "open": len(windows) - n,
             "hit_book": hit_book,
             "hit_gate": hit_gate,
-            "gate_coverage": round(100.0 * gate_cov / n, 1) if n else 0.0,
+            "gate_n": gate_n,
+            "gate_coverage": round(100.0 * gate_n / n, 1) if n else 0.0,
             "book_acc": round(100.0 * hit_book / n, 1) if n else None,
-            "gate_acc": round(100.0 * hit_gate / n, 1) if n else None,
+            "gate_acc": round(100.0 * hit_gate / gate_n, 1) if gate_n else None,
         },
     }
 

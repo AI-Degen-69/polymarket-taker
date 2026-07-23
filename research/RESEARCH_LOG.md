@@ -215,3 +215,52 @@ two flames:
 
 Nothing else to do. Collector needs ~150 resolved windows (≈11-13h at current
 rate) for a trustworthy verdict.
+
+## Session 4 — 2026-07-23 (24h collector check + gate-accuracy bug)
+
+### At the 24h mark, what does the forward collector say, and is the dashboard reporting it correctly?
+
+**Method.** Pulled `/api/collector-state` from the live Railway deploy
+(`DEPLOY_SHA=7e0d248`). Computed book accuracy (`hit_book / n`) and gated
+accuracy two ways: (a) the shipped dashboard metric `hit_gate / n`, and (b) the
+backtest-aligned `hit_gate / gated` where `gated` = windows where the gate
+actually fired (`|spot_bps| ≥ 5`). Cross-checked the DB-wide `stats` object
+against the window payload and the collection span (oldest snap 07-22 18:52 →
+newest 07-23 02:33, 7.7h continuous). Confirmed liveness via `/api/state`
+(`bot_running` + `collector_running` both True) and `/api/health` (200), and
+that the `/data` volume (91 MB) keeps `collector.db` across redeploys.
+
+**Result.**
+
+- `n = 91` resolved (was 33 at Session 3 wrap) — still **below the 150 verdict
+  threshold**, so no final call is possible yet; the experiment must keep
+  collecting.
+- Book-favoured-side accuracy (ungated): **71.4%** [61.4–79.7] (Wilson 95%),
+  n=91 — *below* the 81% benchmark the backtest implied.
+- Gated accuracy: the dashboard shipped `hit_gate / n` = 26/91 = **28.6%**
+  (wrong denominator). The correct figure is `hit_gate / gated` = 26/30 =
+  **86.7%** [70.3–94.7]. `GATE GAP` as-shipped rendered **❄️ −42.8 pts**; the
+  true gap is **🔥 +15.2 pts**.
+- Root cause confirmed in `server/dashboard.py:806`: `gate_acc` divided by `n`
+  (all windows) instead of the gated subset. The flame logic
+  (`gateHot = gate_acc >= 94`) is therefore miscalibrated — with the wrong
+  metric it is capped at the ~33% gate coverage and can *never* light, so the
+  page was actively misreporting a live, positive gate signal as cold/failing.
+
+**Verdict.** Two distinct outcomes:
+
+- **Experiment: OPEN (not enough sample).** At n=91 the forward book-favoured
+  side (71.4%) is below the 81% it must clear, and gated accuracy (86.7%) sits
+  below the 94% flame bar with a wide CI [70–95]. Neither flame can honestly
+  light. The current lean — forward combo weaker than the backtest's 81→96 —
+  is consistent with Session 2's fresh-data retest (77→93). Continue to ≥150
+  windows, then revisit.
+- **Instrumentation bug: DEAD (fixed).** Corrected `gate_acc` to divide by
+  gated windows, added `gate_n` to the stats payload, and added a gated-sample
+  floor (`gate_n ≥ 20`) to `GATE HEAT` so the flame only fires on a meaningful
+  base, with `n` shown in the pill. Folded the uncommitted `server/kanban.py`
+  LIVE/KANBAN/COLLECTOR nav + deploy footer into the same commit (it had been
+  dangling since Session 3, leaving `/kanban` the only view without the nav).
+  Redeployed volume-preserving (Railway auto-deploys on push; `/data` volume
+  keeps the 91-window sample). Verified live after deploy: `/api/collector-state`
+  returns the corrected `gate_acc` (86.7%) and `gate_n` (30).
