@@ -514,7 +514,15 @@ async def poll_collector_running_loop():
     resolves it directly. Absence of the file (or a dead pid) => not running.
     """
     pid_path = ROOT / "collector.pid"
+    collector_enabled = os.environ.get("COLLECTOR_ENABLED", "0").strip() in (
+        "1", "true", "True", "yes")
     while True:
+        if not collector_enabled:
+            # Collector intentionally stopped (gate thesis retired). Report
+            # not-running and do not spin on a stale pid file.
+            _state["collector_running"] = False
+            await asyncio.sleep(5.0)
+            continue
         running = False
         if pid_path.exists():
             try:

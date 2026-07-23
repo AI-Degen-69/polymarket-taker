@@ -350,3 +350,24 @@ it does not move the verdict.
 **Verdict.** DEAD (fixed) — display bug only; same class as the Session-4
 `gate_acc` and 200-row-cap bugs, and exactly why we recompute verdict metrics
 independently instead of trusting the rendered number.
+
+### Retire the forward collector (gate question answered)
+
+**Method.** With the gate thesis DEAD, the 24/7 `strategy.collect_gate` observer
+is no longer earning its keep (it writes to `collector.db` but never affects the
+bot). Gated the collector supervisor thread in `deploy/run_service.py` behind
+`COLLECTOR_ENABLED` (unset = stopped), so a Railway redeploy simply does not
+start it. The bot, dashboard, and prune threads are untouched — only the second
+subprocess is dropped. Also made the dashboard's `collector_running` poll respect
+the same flag and remove any stale `collector.pid`, so the UI reports
+`collector_running=False` instead of a false "alive" inherited from the prior
+deploy.
+
+**Result.** `collector.db` (313 resolved windows) stays frozen on the Railway
+`/data` volume as the negative-result archive — the sample is preserved, just no
+longer appended to. Set `COLLECTOR_ENABLED=1` in the host Variables to revive the
+observer without a code change. Push triggers a Railway auto-redeploy; the bot
+keeps trading on the 0.80–0.90 band analysis.
+
+**Verdict.** LIVE (governance) — no research conclusion changed; the experiment
+is closed cleanly.

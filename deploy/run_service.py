@@ -218,7 +218,22 @@ def main() -> None:
         return
     preflight()
     threading.Thread(target=run_bot, name="bot", daemon=True).start()
-    threading.Thread(target=run_collector, name="collector", daemon=True).start()
+    # Collector is opt-in. It retired the gate question at n=313 (forward combo
+    # 78/88 vs backtest 81/96; gate DEAD as a standalone win-rate improver).
+    # Keep COLLECTOR_ENABLED unset/off to leave it stopped; set it to start the
+    # read-only observer again (e.g. to keep archiving windows).
+    if os.environ.get("COLLECTOR_ENABLED", "0").strip() in ("1", "true", "True", "yes"):
+        threading.Thread(target=run_collector, name="collector", daemon=True).start()
+        print("[collector] ENABLED via COLLECTOR_ENABLED=1", flush=True)
+    else:
+        # Drop any stale pid so the dashboard reports collector_running=False
+        # instead of a false "alive" inherited from the previous deploy.
+        try:
+            (ROOT / "collector.pid").unlink(missing_ok=True)
+        except OSError:
+            pass
+        print("[collector] DISABLED (COLLECTOR_ENABLED not set) -- gate thesis "
+              "retired at n=313; collector.db frozen on the /data volume", flush=True)
     threading.Thread(target=prune_loop, name="prune", daemon=True).start()
 
     import uvicorn
