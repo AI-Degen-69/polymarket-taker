@@ -388,3 +388,114 @@ the verdict (every window independently reconcilable against `stats`).
 
 **Verdict.** LIVE (UX/integrity) — closes the last gap in making the forward
 sample fully exportable.
+
+---
+
+## Session 6 — 2026-07-23 (per-band edge at n=7995 — the last standing thesis is DEAD)
+
+### At full sample (n=7995), is the "0.80-0.90 was the only profitable band" claim still true?
+
+**Question.** Session 5's verdict named the 0.80-0.90 entry band as "the
+taker's *only* profitable band ever found" (Sessions 1/2, n=110: +2.4 pts
+vs breakeven). The whole remaining case for the strategy hung on that
+band. But that was n=110; the live paper bot has since run for ~3 more
+days and filled 7,885 more orders. The honest question is whether the
++2.4 pt reading was a real edge or a small-sample artifact.
+
+**Method.** Pulled `/api/state` from the live Railway deploy
+(`claude-poly-bot-production.up.railway.app`); the `sim.buckets` block
+is computed in `strategy/store.py:sim_report` by joining `orders` to
+`resolutions` on `condition_id`, grouping by `price` into four fixed
+buckets (`0.80-0.90`, `0.90-0.95`, `0.95-0.98`, `0.98-1.01`),
+computing each bucket's win rate and mean breakeven
+(`p + 0.07·p·(1-p)`), and reporting `edge_pts = wr − breakeven`.
+Independently recomputed `edge_pts` from the published `wins`/`n` and
+`breakeven` (row arithmetic) — every band matches the published
+`edge_pts` to displayed precision, so the dashboard isn't lying. Then
+computed the Wilson 95% CI on each band's win rate and tested whether
+the bucket's breakeven sits inside that CI.
+
+**Result — every band is negative, including 0.80-0.90:**
+
+| band | n | wins | WR | breakeven | edge_pts | WR 95% CI | breakeven in CI? |
+|---|---|---|---|---|---|---|---|
+| 0.80-0.90 | 1252 | 1059 | 84.58% | 86.31% | **−1.73** | [82.5%, 86.5%] | yes (barely — upper bound 86.48 vs BE 86.31) |
+| 0.90-0.95 | 2086 | 1904 | 91.28% | 92.90% | **−1.63** | [90.0%, 92.4%] | **no** (upper bound 92.42 < BE 92.90) |
+| 0.95-0.98 | 2335 | 2236 | 95.76% | 96.37% | **−0.61** | [94.9%, 96.5%] | yes (upper bound 96.53 > BE 96.37) |
+| 0.98-1.01 | 2322 | 2271 | 97.80% | 98.65% | **−0.85** | [97.1%, 98.3%] | **no** (upper bound 98.32 < BE 98.65) |
+
+Totals: n=7995, wins=7470 (93.43%), realized PnL −$1708.51, return
+−34.17%, gross spent $188,695.72, total fees $378.59. The 0.80-0.90
+band that the prior summary called "the only profitable one" is now
+−$108 in realized P&L at 84.58% vs the 86.31% breakeven that those
+prices demand.
+
+**Interpretation.**
+
+- The 0.80-0.90 +2.4 pt claim from n=110 was a small-sample artifact.
+  The 95% CI at n=110 was roughly ±4 pts wide — a swing of 4.1 pts
+  (from +2.4 to −1.73) across 11× more data is exactly what sampling
+  noise looks like in this region. At n=1252 the CI is ±2 pts and the
+  sign of the edge is pinned negative.
+- The 0.90-0.95 and 0.98-1.01 bands are **dead with 95% confidence** —
+  the breakeven lies *above* the WR's upper CI bound. Not borderline.
+- The 0.80-0.90 and 0.95-0.98 bands are *technically* inside the CI
+  (the point estimate is below breakeven, but the upper CI bound
+  brushes it). The realized P&L in both bands is negative
+  (0.80-0.90: −$108; 0.95-0.98: −$229), so the economic verdict is
+  the same even if the statistical one has a hair of daylight.
+- The 0.98-1.01 band is the single biggest dollar loser (−$1,073, 60%
+  of the total P&L) despite having the highest win rate, because it
+  carries 68% of the gross spend — exactly the volume profile the
+  Bonereaper intel file predicted, minus the edge that intel attributed
+  to latency arb. Without that infrastructure edge, the high-price
+  band is a fee incinerator.
+- The gate's 78/88 forward result (Session 5) and the per-band
+  −1.73/−1.63/−0.61/−0.85 result here are *the same finding* at two
+  scales: no entry band + no signal combination the taker has access
+  to (entry-band filter, gate filter, size ladder) clears the
+  payoff-implied breakeven with statistical confidence at n=7995.
+
+**Verdict — taker project: DEAD (whole).**
+
+- The 0.80-0.90 band: **DEAD.** Retracts the Session-1/2 "only
+  profitable band" line. The edge was sampling noise.
+- The 0.90-0.95 band: **DEAD** with 95% confidence.
+- The 0.95-0.98 band: **DEAD** at the point estimate; CI just barely
+  contains breakeven but the realized P&L is negative.
+- The 0.98-1.01 band: **DEAD** with 95% confidence.
+- The whole taker strategy (entry-band 0.80-0.99, last 120s, scaling
+  ladder, spot-gate filter): **DEAD.** The remaining live paper trade
+  is not informative — it just adds data to a closed question. **Stop
+  the live bot.** This is the moment the project was designed to
+  detect; running longer accumulates losses (paper) for a question
+  the data has already answered.
+- The collector, the live bot, and the dashboard can stay up only as
+  a frozen negative-result archive. The right operational move is:
+  set `BOT_ENABLED=0` (analogous to the `COLLECTOR_ENABLED` flag
+  already wired in `deploy/run_service.py`) so the bot stops filling,
+  while `collector.db` and `trades.db` remain on the `/data` volume as
+  the dataset that killed the thesis.
+
+### Instrumentation / methodology notes (for the next analyst)
+
+- The bucket key in `/api/state` is the literal `f"{lo:.2f}-{hi:.2f}"`
+  string from `sim_report` — when parsing, don't reconstruct from the
+  bucket label, just match the key.
+- `breakeven` in each bucket is the *mean* of per-row
+  `breakeven_win_rate(price)`, not `breakeven_win_rate(mean_price)`.
+  They differ when a bucket's prices are skewed (the 0.95-0.98 bucket's
+  `breakeven=0.9637` is slightly higher than `breakeven(0.965)≈0.9633`
+  because of the convexity of `p(1-p)` near 0.5; the per-row mean is
+  the right number).
+- `pending` rows (orders with no resolution yet) are excluded from
+  the bucket counts. At the time of pull, `pending=25` — ~0.3% of the
+  7995 resolved; not material to the verdict.
+- The `edge_pts` field's sign is the right test. The bucket WR CI vs
+  the bucket breakeven is a secondary check that says "how confident
+  are we the edge is really negative" — and two bands (0.90-0.95 and
+  0.98-1.01) are *already* past that bar.
+
+**Verdict.** DEAD — both for the four-band hypothesis and for the
+overall strategy. No further data collection is informative; the next
+session's job is to wire the kill switch, not to keep sampling.
